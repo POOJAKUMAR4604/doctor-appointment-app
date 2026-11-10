@@ -31,7 +31,7 @@ export default function Login() {
     try {
       const response = await API.post('/auth/login', { email, password });
       
-      const role = response.data?.user?.role || 'patient';
+      const role = response.data?.user?.role;
       const user = response.data?.user;
       const doctorProfile = response.data?.doctorProfile;
 
