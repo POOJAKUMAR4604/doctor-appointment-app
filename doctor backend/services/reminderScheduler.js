@@ -148,20 +148,79 @@ async function createReminderIfNotExists(userId, title, message, appointmentId, 
   }
 }
 
+/**
+ * Automatically cleans up expired unbooked slots:
+ * 1. Any unbooked slot whose date is strictly before today.
+ * 2. Any unbooked slot for today whose end time has already elapsed.
+ * Booked appointments and their slots are never touched to preserve consultation records.
+ */
+async function cleanExpiredUnbookedSlots() {
+  try {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    // 1. Delete all unbooked slots from past calendar dates
+    const pastDeleted = await DoctorSlot.destroy({
+      where: {
+        isBooked: false,
+        date: {
+          [Op.lt]: todayStr,
+        },
+      },
+    });
+
+    if (pastDeleted > 0) {
+      console.log(`[Auto-Cleanup] Successfully cleaned up ${pastDeleted} expired unbooked slot(s) from past dates.`);
+    }
+
+    // 2. Also check today's unbooked slots whose end time has passed
+    const todaysUnbookedSlots = await DoctorSlot.findAll({
+      where: {
+        isBooked: false,
+        date: todayStr,
+      },
+    });
+
+    const elapsedSlotIds = [];
+    for (const slot of todaysUnbookedSlots) {
+      const slotEndTime = parseSlotDateTime(slot.date, slot.endTime);
+      if (slotEndTime && slotEndTime < now) {
+        elapsedSlotIds.push(slot.id);
+      }
+    }
+
+    if (elapsedSlotIds.length > 0) {
+      await DoctorSlot.destroy({
+        where: {
+          id: {
+            [Op.in]: elapsedSlotIds,
+          },
+        },
+      });
+      console.log(`[Auto-Cleanup] Cleaned up ${elapsedSlotIds.length} expired unbooked slot(s) for today that already ended.`);
+    }
+  } catch (err) {
+    console.error('[Auto-Cleanup] Error cleaning expired unbooked slots:', err);
+  }
+}
+
 // Start recurring scheduler
 function startNotificationScheduler() {
   // Check every 2 minutes for upcoming appointments
   cron.schedule('*/2 * * * *', () => {
     checkUpcomingAppointmentReminders();
+    cleanExpiredUnbookedSlots();
   });
 
-  // Run initial check right now on server boot
+  // Run initial checks right now on server boot
   checkUpcomingAppointmentReminders();
-  console.log('Automated Appointment Reminder Scheduler started (runs every 2 mins).');
+  cleanExpiredUnbookedSlots();
+  console.log('Automated Appointment Reminder & Slot Cleanup Scheduler started (runs every 2 mins).');
 }
 
 module.exports = {
   startNotificationScheduler,
   parseSlotDateTime,
   checkUpcomingAppointmentReminders,
+  cleanExpiredUnbookedSlots,
 };

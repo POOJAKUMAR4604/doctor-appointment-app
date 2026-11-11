@@ -130,6 +130,20 @@ exports.getMySlots = async (req, res) => {
       return res.status(404).json({ message: 'Doctor profile not found.' });
     }
 
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    // Auto-clean any expired unbooked slots from past days for this doctor
+    await DoctorSlot.destroy({
+      where: {
+        doctorId: doctorProfile.id,
+        isBooked: false,
+        date: {
+          [Op.lt]: todayStr,
+        },
+      },
+    });
+
     const whereClause = { doctorId: doctorProfile.id };
 
     if (req.query.date) {
